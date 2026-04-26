@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend, backend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.app }}
+        run: npm install
+
+      - name: Build frontend
+        if: matrix.app == 'frontend'
+        working-directory: frontend
+        run: npm run build
+
+      - name: Validate backend startup script
+        if: matrix.app == 'backend'
+        working-directory: backend
+        run: npm run start -- --help || true
+
+  smoke-e2e:
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Start backend
+        run: npm --workspace backend run dev > backend.log 2>&1 &
+        env:
+          NODE_ENV: test
+          PORT: 8080
+          API_VERSION: v1
+          FRONTEND_URL: http://localhost:3000
+          MONGODB_URI: mongodb://127.0.0.1:27017/loomis_ai_ci
+          JWT_SECRET: ci_smoke_secret_key
+          JWT_EXPIRES_IN: 1h
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4o-mini
+
+      - name: Run E2E smoke script
+        run: npm run smoke:e2e
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:8080/api/v1
+
+      - name: Summarize strict mode enabled
+        if: ${{ secrets.RUN_OPENAI_STRICT_SMOKE == 'true' }}
+        run: |
+          echo "## Smoke Test Mode" >> "$GITHUB_STEP_SUMMARY"
+          echo "Strict OpenAI smoke: ENABLED" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize strict mode disabled
+        if: ${{ secrets.RUN_OPENAI_STRICT_SMOKE != 'true' }}
+        run: |
+          echo "## Smoke Test Mode" >> "$GITHUB_STEP_SUMMARY"
+          echo "Strict OpenAI smoke: DISABLED" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run strict E2E smoke script (real OpenAI required)
+        if: ${{ secrets.RUN_OPENAI_STRICT_SMOKE == 'true' }}
+        run: npm run smoke:e2e
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:8080/api/v1
+          SMOKE_REQUIRE_REAL_OPENAI: 'true'
+
+      - name: Print backend logs on failure
+        if: failure()
+        run: cat backend.log

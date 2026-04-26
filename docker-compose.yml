@@ -1,0 +1,41 @@
+version: '3.9'
+services:
+  mongodb:
+    image: mongo:7
+    container_name: loomis-mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+
+  backend:
+    image: node:22
+    container_name: loomis-backend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ./backend:/app
+    ports:
+      - '8080:8080'
+    env_file:
+      - .env
+    depends_on:
+      - mongodb
+
+  frontend:
+    image: node:22
+    container_name: loomis-frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ./frontend:/app
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:
