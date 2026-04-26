@@ -8,14 +8,36 @@ import { globalRateLimiter } from './middleware/rateLimiter.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+function normalizeOrigin(origin) {
+  if (!origin) return '';
+  return origin.trim().replace(/\/+$/, '');
+}
+
+function getAllowedOrigins() {
+  return env.frontendUrl
+    .split(',')
+    .map(normalizeOrigin)
+    .filter(Boolean);
+}
 import historyRoutes from './routes/historyRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
+  const allowedOrigins = getAllowedOrigins();
 
 export function buildApp() {
   const app = express();
 
-  app.use(helmet());
+      origin: (origin, callback) => {
+        // Allow non-browser and same-origin requests (no Origin header).
+        if (!origin) return callback(null, true);
+
+        const requestOrigin = normalizeOrigin(origin);
+        if (allowedOrigins.includes(requestOrigin)) {
+          return callback(null, true);
+        }
+
+        return callback(new Error('CORS origin not allowed'));
+      },
   app.use(
     cors({
       origin: env.frontendUrl,
